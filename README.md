@@ -1,9 +1,13 @@
 # UPS → NUT serveur + MQTT — Guide complet Raspberry Pi
 
-Setup complet pour superviser un onduleur branché en USB sur un Raspberry Pi (ici un RPi Kodi) et remonter les données dans Home Assistant, via deux voies au choix ou combinées :
+Setup complet pour superviser un onduleur branché en USB sur un Raspberry Pi (ici un RPi Kodi) et remonter les données dans Home Assistant.
 
-* **NUT serveur** (port 3493) → intégration NUT native de HA
-* **Bridge MQTT** → découverte automatique dans HA
+Deux voies étaient prévues :
+
+* **NUT serveur** (port 3493) → intégration NUT native de HA — **❌ ne fonctionne pas ici** (échec de configuration dans HA, voir section 5)
+* **Bridge MQTT** → découverte automatique dans HA — **✅ solution retenue**
+
+Le serveur NUT reste installé sur le RPi, mais uniquement comme **backend local** : le bridge MQTT lit les données via `upsc` et les publie sur Mosquitto. C'est pour ça que le projet s'articule autour du bridge MQTT.
 
 Testé avec : Raspberry Pi OS + Kodi, Eaton Ellipse PRO 650, Home Assistant + add-on Mosquitto.
 
@@ -25,16 +29,15 @@ Testé avec : Raspberry Pi OS + Kodi, Eaton Ellipse PRO 650, Home Assistant + ad
 ## 1. Architecture
 
 ```
-[Onduleur USB]──▶[RPi Kodi]                                 [Home Assistant]
+[Ondoleur USB]──▶[RPi Kodi]                                 [Home Assistant]
                     │                                              │
-                    ├─ nut-server (port 3493) ──── intégration NUT ─┤
-                    └─ ups-mqtt-bridge (systemd) ── broker MQTT ───┘
+                    ├─ nut-server (backend local)                   │
+                    │    └─ ups-mqtt-bridge (systemd) ── broker MQTT ─┘
+                    └─ port 3493 ──── intégration NUT HA ❌ (échec)
 ```
 
-* **NUT serveur** : détecte l'onduleur, expose les données sur le réseau (port 3493). HA interroge directement.
-* **Bridge MQTT** : lit NUT en local (`upsc`) et publie sur le broker Mosquitto de HA avec découverte automatique.
-
-Les deux voies sont redondantes — garde celle que tu préfères, ou les deux.
+* **NUT serveur** : détecte l'onduleur et fournit les données en local à `upsc`. L'intégration NUT native de HA **ne fonctionne pas** dans ce setup (section 5) — le port 3493 reste ouvert si tu veux réessayer, mais ce n'est pas la voie utilisée.
+* **Bridge MQTT** : lit NUT en local (`upsc`) et publie sur le broker Mosquitto de HA avec découverte automatique. **C'est la voie qui fonctionne et qui est utilisée.**
 
 ---
 
@@ -48,10 +51,13 @@ sudo ./ups-setup.sh
 ```
 
 Le script :
+
 * installe `nut`, `nut-client`, `nut-server`, `whiptail` ;
 * détecte les onduleurs USB avec `nut-scanner -U` et les nomme `ups1`, `ups2`, … ;
 * écrit `/etc/nut/nut.conf` (`MODE=netserver`), `upsd.conf` (`LISTEN 0.0.0.0 3493`), `upsd.users` (compte `hass` / `homeassistant`) ;
 * active et démarre `nut-server`.
+
+> ℹ️ Même si l'intégration NUT de HA ne fonctionne pas (section 5), ce script **reste obligatoire** : le bridge MQTT a besoin du serveur NUT local pour interroger l'onduleur via `upsc`.
 
 ---
 
@@ -65,12 +71,14 @@ sudo ./ups-mqtt-install.sh
 ```
 
 L'installateur :
+
 * détecte l'onduleur (menu à partir de `/opt/ups-setup/ups_detected.list`) ;
 * demande l'adresse/port du broker Mosquitto, les identifiants, l'intervalle et un identifiant unique (`NODE_ID`) ;
 * teste la connexion au broker **avant** de déployer (2 essais + diagnostic port/identifiants) ;
 * déploie `/usr/local/bin/ups-mqtt-bridge.sh`, la config `/etc/default/ups-mqtt-bridge` (chmod 600) et le service systemd `ups-mqtt-bridge`.
 
 Le bridge publie :
+
 * les topics de découverte `homeassistant/sensor/<NODE_ID>-<capteur>/config` (retained, QoS 1) ;
 * l'état JSON sur `home/ups/<NODE_ID>/state`.
 
@@ -125,18 +133,23 @@ journalctl -u ups-mqtt-bridge -f      # suivre les publications en direct
 
 ## 5. Home Assistant
 
-### Intégration NUT (voie 1)
+### Intégration NUT native — ❌ ne fonctionne pas
 
-Paramètres → Appareils et services → Ajouter une intégration → **NUT** :
+L'intégration NUT native de HA **échoue** dans ce setup, alors même que le serveur NUT répond parfaitement en local et sur le réseau :
 
-* Host : IP du RPi
-* Port : `3493`
-* Username : `hass`
-* Password : `homeassistant`
+* `upsc ups1@localhost` renvoie toutes les données depuis le RPi ;
+* `upsc ups1@<IP_RPi>` fonctionne depuis un autre hôte du LAN ;
+* mais dans HA : Paramètres → Appareils et services → Ajouter une intégration → **NUT** (Host : IP du RPi, Port : `3493`, Username : `hass`, Password : `homeassistant`) → la configuration **échoue** (erreur de connexion / entités jamais créées).
 
-### Intégration MQTT (voie 2)
+Ce type d'échec est un problème récurrent de l'intégration NUT de HA (incompatibilités selon les drivers/onduleurs, réponses de `upsd` que l'intégration ne tolère pas). Peu importe la cause exacte ici : **c'est le constat, et c'est pour ça que le bridge MQTT a été réalisé.**
 
-Les capteurs apparaissent automatiquement (découverte MQTT) sous l'appareil « UPS (kodi) » : état, charge batterie, autonomie (s), charge onduleur, tensions/fréquences entrée-sortie, puissance VA/W, bipeur, prises, etc. La fiche appareil affiche fabricant, modèle, numéro de série et firmware.
+Si tu veux malgré tout réessayer un jour : vérifier le port 3493 (`ufw status`), les identifiants `hass/homeassistant`, et les logs HA (`home-assistant.log`). Mais la voie fiable et retenue est la suivante.
+
+### Intégration MQTT — ✅ solution retenue
+
+Le bridge publie avec découverte automatique : les capteurs apparaissent sans aucune manipulation sous l'appareil « UPS (kodi) » : état, charge batterie, autonomie (s), charge onduleur, tensions/fréquences entrée-sortie, puissance VA/W, bipeur, prises, etc. La fiche appareil affiche fabricant, modèle, numéro de série et firmware.
+
+C'est cette voie qui alimente HA — l'intégration NUT native est abandonnée.
 
 Pour vérifier en direct : MQTT → « Écouter un sujet » → `home/ups/#`
 
@@ -161,26 +174,27 @@ automation:
 
 **Scénario** : un premier onduleur (identique) est déjà branché sur un autre hôte et intégré dans HA via NUT. On veut ajouter celui du RPi Kodi **sans** casser l'intégration existante et sans entités en doublon.
 
-### Règle d'or
+> ⚠️ Sur le RPi Kodi, l'intégration NUT native ne fonctionne pas (section 5) — donc la voie retenue pour ce second onduleur est **le bridge MQTT**. L'option NUT ci-dessous est documentée pour référence, mais c'est bien MQTT qui est utilisé.
 
-Un onduleur ≠ un hôte NUT. L'intégration NUT de HA interroge **un serveur NUT** (host:port) mais peut lister **plusieurs onduleurs** sur ce serveur. Deux cas :
+### Option A — Deux intégrations NUT (une par hôte) — théorique seulement
 
-* **Les deux UPS sont sur le même RPi** → le script `ups-setup.sh` les détecte tous les deux (`ups1`, `ups2`). Il suffit de cocher les deux dans l'intégration NUT existante : Paramètres → Appareils et services → NUT → Configurer → les nouveaux onduleurs apparaissent.
-* **Le premier UPS est sur une autre machine** (cas le plus courant) → on ajoute une **deuxième entrée NUT** dans HA, ou on passe par la **voie MQTT** avec un `NODE_ID` distinct.
-
-### Option A — Deux intégrations NUT (une par hôte)
+En théorie :
 
 1. Sur le RPi Kodi : lancer `ups-setup.sh` (NUT serveur écoute sur `0.0.0.0:3493`).
 2. Dans HA : Ajouter une intégration → **NUT** → renseigner l'IP du RPi Kodi, port `3493`, `hass` / `homeassistant`.
 3. HA crée un **second appareil** distinct. Aucun conflit avec le premier UPS : les entités du RPi Kodi préfixent leur nom différemment (host différent).
 
-⚠ Ne supprime pas l'intégration NUT existante — on **ajoute**, on ne remplace pas. Deux intégrations NUT coexistent sans problème.
+**Dans la pratique : c'est exactement ce qui a été tenté et l'intégration échoue** (section 5). Le port 3493 répond, les identifiants sont bons, mais HA refuse de configurer l'intégration. C'est la raison d'être du bridge MQTT.
 
-### Option B — Bridge MQTT pour le second UPS (recommandé si redondance souhaitée)
+Si ton premier UPS est intégré via NUT sur un autre hôte où ça fonctionne : laisse-le tel quel, ne supprime rien.
+
+### Option B — Bridge MQTT pour le second UPS — ✅ LA solution utilisée
 
 1. Sur le RPi Kodi : `sudo ./ups-mqtt-install.sh`.
 2. À la question « Identifiant unique », donner un nom **différent** du premier UPS, ex. `kodi` (le premier restant sur NUT).
 3. Dans HA, un nouvel appareil « UPS (kodi) » apparaît via découverte MQTT — aucun doublon car le `unique_id` de chaque capteur est préfixé par le `NODE_ID`.
+
+Avantages sur l'intégration NUT (outre le fait qu'elle fonctionne) : fiche appareil complète (modèle, série, firmware), capteurs choisis et nommés en français, publication retained (HA garde les valeurs même après redémarrage du bridge), et aucune dépendance au comportement de l'intégration native.
 
 ⚠ **Pièges avec deux UPS identiques** :
 
@@ -192,8 +206,8 @@ Un onduleur ≠ un hôte NUT. L'intégration NUT de HA interroge **un serveur NU
 
 | UPS | Voie | Appareil HA |
 |---|---|---|
-| UPS 1 (hôte existant) | NUT (intégration existante) | inchangé |
-| UPS 2 (RPi Kodi) | NUT (2e intégration) ou MQTT | « UPS (kodi) » |
+| UPS 1 (hôte existant) | NUT (intégration existante, fonctionne là-bas) | inchangé |
+| UPS 2 (RPi Kodi) | **MQTT** (bridge — l'intégration NUT échoue sur ce RPi) | « UPS (kodi) » |
 
 ---
 
@@ -230,7 +244,7 @@ sensor:
 |---|---|
 | Pas d'onduleur détecté | `nut-scanner -U` ; câble USB ; `lsusb` |
 | `upsc` ne répond pas | `systemctl status nut-server` ; `journalctl -u nut-driver@ups1` |
-| HA (NUT) ne connecte pas | port 3493 ouvert ? `ufw status` ; identifiants `hass/homeassistant` |
+| HA (NUT) ne connecte pas | comportement connu ici — voir section 5 ; port 3493 ouvert ? `ufw status` ; identifiants `hass/homeassistant` |
 | Broker injoignable | IP de HA correcte ; add-on Mosquitto → Network → port 1883 exposé |
 | Publication refusée | utilisateurs MQTT de l'add-on Mosquitto |
 | Capteurs absents dans HA | MQTT → Écouter `home/ups/#` ; redémarrer `ups-mqtt-bridge` |
