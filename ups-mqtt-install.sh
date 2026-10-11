@@ -87,7 +87,7 @@ else
     --msgbox "upsc ne peut pas interroger l'onduleur sans identifiants.\n\nVérifiez que nut-server tourne (systemctl status nut-server)." 10 60
   UPS_USER=$(whiptail --title "Utilisateur upsd" --inputbox "Nom d'utilisateur upsd" 10 60 "${UPS_USER:-hass}" 3>&1 1>&2 2>&3) || exit 1
   UPS_PASS=$(whiptail --title "Mot de passe upsd" --passwordbox "Mot de passe upsd" 10 60 "" 3>&1 1>&2 2>&3) || exit 1
-  if ! upsc -u "$UPS_USER" -p "$UPS_PASS" "$UPS_NAME@localhost" >/dev/null 2>&1; then
+  if ! NUT_USERNAME="$UPS_USER" NUT_PASSWORD="$UPS_PASS" upsc "$UPS_NAME@localhost" >/dev/null 2>&1; then
     whiptail --title "Identifiants refusés" \
       --yesno "upsc refuse toujours ces identifiants.\n\nContinuer quand même ?" 10 60 || exit 1
   fi
@@ -148,8 +148,9 @@ UPS_HOST="${UPS_HOST:-localhost}"
 UPS_USER="${UPS_USER:-}"
 UPS_PASS="${UPS_PASS:-}"
 
-UPSC=(upsc)
-[[ -n "$UPS_USER" ]] && UPSC+=(-u "$UPS_USER" -p "$UPS_PASS")
+# upsc >= 2.8.0 n'accepte plus -u/-p : identifiants passés par environnement
+export NUT_USERNAME="$UPS_USER"
+export NUT_PASSWORD="$UPS_PASS"
 MQTT_HOST="${MQTT_HOST:-127.0.0.1}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
@@ -203,7 +204,7 @@ declare -A SENSORS=(
 )
 
 # --- Infos d'identification (fiche appareil HA) ---
-INIT_DATA=$("${UPSC[@]}" "$UPS_NAME@$UPS_HOST" 2>/dev/null)
+INIT_DATA=$(upsc "$UPS_NAME@$UPS_HOST" 2>/dev/null)
 iget() { echo "$INIT_DATA" | awk -F': ' -v k="$1" '$1==k{print $2}'; }
 DEV_MFR=$(iget device.mfr)
 DEV_MODEL=$(iget device.model)
@@ -228,7 +229,7 @@ done
 
 # --- Boucle de publication ---
 while true; do
-  DATA=$("${UPSC[@]}" "$UPS_NAME@$UPS_HOST" 2>/dev/null)
+  DATA=$(upsc "$UPS_NAME@$UPS_HOST" 2>/dev/null)
   if [[ -z "$DATA" ]]; then
     sleep "$POLL_INTERVAL"
     continue
