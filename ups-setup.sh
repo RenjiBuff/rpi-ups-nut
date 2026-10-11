@@ -194,9 +194,9 @@ fi
 echo "───────────────────────────────────────────────"
 echo ""
 echo "Tests:"
-echo "  ➤ upsc -u $UPSD_USER -p <mot_de_passe> $(head -1 "$UPS_LIST_FILE")@localhost   (local)"
+echo "  ➤ NUT_USERNAME=$UPSD_USER NUT_PASSWORD=<mot_de_passe> upsc $(head -1 "$UPS_LIST_FILE")@localhost   (local)"
 if [[ "$LISTEN_MODE" == "reseau" ]]; then
-  echo "  ➤ upsc -u $UPSD_USER -p <mot_de_passe> $(head -1 "$UPS_LIST_FILE")@${LAN_IP:-<IP>}   (depuis HA)"
+  echo "  ➤ NUT_USERNAME=$UPSD_USER NUT_PASSWORD=<mot_de_passe> upsc $(head -1 "$UPS_LIST_FILE")@${LAN_IP:-<IP>}   (depuis HA)"
 fi
 echo ""
 echo "Troubleshooting:"

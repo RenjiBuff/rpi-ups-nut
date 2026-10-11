@@ -80,7 +80,7 @@ sudo ./ups-mqtt-install.sh
 L'installateur :
 
 * détecte l'onduleur (menu à partir de `/opt/ups-setup/ups_detected.list`) ;
-* **demande les identifiants upsd** si le serveur NUT local en requiert (testés immédiatement avec `upsc -u … -p …`) — le bridge les utilise pour toutes ses requêtes ;
+* **demande les identifiants upsd** si le serveur NUT local en requiert (testés immédiatement avec `upsc`) — le bridge les utilise pour toutes ses requêtes ;
 * demande l'adresse/port du broker Mosquitto, les identifiants MQTT, l'intervalle et un identifiant unique (`NODE_ID`) ;
 * **propose la configuration existante par défaut** si le bridge est déjà installé (chargée depuis `/etc/default/ups-mqtt-bridge` : nom d'onduleur, broker, port, utilisateurs, intervalle, `NODE_ID`) — une mise à jour se fait en validant chaque écran sans tout ressaisir ;
 * teste la connexion au broker **avant** de déployer (2 essais + diagnostic port/identifiants) ;
