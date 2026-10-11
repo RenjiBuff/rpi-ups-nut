@@ -43,6 +43,19 @@ whiptail --title "UPS → MQTT Bridge" \
   --yesno "Cet installateur va :\n\n  1. Détecter votre onduleur (NUT)\n  2. Demander les infos du broker MQTT\n  3. Installer et démarrer le service\n\nContinuer ?" 14 60 || { echo "Annulé."; exit 0; }
 
 # ================================
+# CONFIG EXISTANTE (mise à jour facilitée)
+# ================================
+# Si le bridge est déjà installé, on charge sa configuration et on la
+# propose comme valeurs par défaut dans chaque question.
+ENV_FILE="/etc/default/ups-mqtt-bridge"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  echo "✤ Configuration existante détectée ($ENV_FILE) — proposée par défaut."
+  echo "  UPS: ${UPS_NAME:-?} | Broker: ${MQTT_HOST:-?}:${MQTT_PORT:-1883} | Node: ${NODE_ID:-$(hostname)}"
+fi
+
+# ================================
 # 1. DÉTECTION DE L'ONDULEUR
 # ================================
 UPS_LIST_FILE="/opt/ups-setup/ups_detected.list"
@@ -64,8 +77,10 @@ if ! upsc "$UPS_NAME@localhost" >/dev/null 2>&1; then
 fi
 
 # --- Identifiants upsd (demandés systématiquement, rien en dur) ---
+UPS_AUTH_DEF="--defaultno"
+[[ -n "${UPS_USER:-}" ]] && UPS_AUTH_DEF=""
 if whiptail --title "Authentification upsd" \
-  --yesno "Le serveur NUT local (upsd) nécessite-t-il un identifiant ?\n\n(si ups-setup.sh a créé un compte, répondez Oui)" 10 60; then
+  --yesno $UPS_AUTH_DEF "Le serveur NUT local (upsd) nécessite-t-il un identifiant ?\n\n(si ups-setup.sh a créé un compte, répondez Oui)" 10 60; then
   UPS_USER=$(whiptail --title "Utilisateur upsd" --inputbox "Nom d'utilisateur upsd" 10 60 "hass" 3>&1 1>&2 2>&3) || exit 1
   UPS_PASS=$(whiptail --title "Mot de passe upsd" --passwordbox "Mot de passe upsd" 10 60 "" 3>&1 1>&2 2>&3) || exit 1
   if ! upsc -u "$UPS_USER" -p "$UPS_PASS" "$UPS_NAME@localhost" >/dev/null 2>&1; then

@@ -60,6 +60,8 @@ Le script :
 * **demande le nom d'utilisateur et le mot de passe** du compte upsd (double saisie + confirmation) — **aucun identifiant codé en dur** ; le compte est en lecture seule (`upsmon slave`) ;
 * active et démarre `nut-server`.
 
+* **propose la configuration existante par défaut** si NUT est déjà installé (mode d'écoute lu dans `upsd.conf`, compte actuel lu dans `upsd.users`) — une mise à jour se fait en validant chaque écran sans tout ressaisir (seul le mot de passe upsd est à retaper).
+
 > ℹ️ Même si l'intégration NUT de HA ne fonctionne pas (section 5), ce script **reste obligatoire** : le bridge MQTT a besoin du serveur NUT local pour interroger l'onduleur via `upsc`.
 
 > 🔒 Par défaut, upsd écoute **en local uniquement** (`127.0.0.1:3493`) : aucune exposition réseau tant qu'on n'a pas besoin d'une intégration NUT distante.
@@ -80,6 +82,7 @@ L'installateur :
 * détecte l'onduleur (menu à partir de `/opt/ups-setup/ups_detected.list`) ;
 * **demande les identifiants upsd** si le serveur NUT local en requiert (testés immédiatement avec `upsc -u … -p …`) — le bridge les utilise pour toutes ses requêtes ;
 * demande l'adresse/port du broker Mosquitto, les identifiants MQTT, l'intervalle et un identifiant unique (`NODE_ID`) ;
+* **propose la configuration existante par défaut** si le bridge est déjà installé (chargée depuis `/etc/default/ups-mqtt-bridge` : nom d'onduleur, broker, port, utilisateurs, intervalle, `NODE_ID`) — une mise à jour se fait en validant chaque écran sans tout ressaisir ;
 * teste la connexion au broker **avant** de déployer (2 essais + diagnostic port/identifiants) ;
 * déploie `/usr/local/bin/ups-mqtt-bridge.sh`, la config `/etc/default/ups-mqtt-bridge` (chmod 600) et le service systemd `ups-mqtt-bridge`.
 

@@ -80,18 +80,37 @@ echo "✅ UPS devices detected:"
 cat "$UPS_LIST_FILE"
 
 # ================================
+# CONFIG EXISTANTE (mise à jour facilitée)
+# ================================
+# Si NUT est déjà configuré, on relit la conf actuelle et on la propose
+# comme valeurs par défaut dans chaque question.
+CUR_LISTEN=""
+CUR_USER=""
+if [[ -f /etc/nut/upsd.conf ]]; then
+  CUR_LISTEN=$(grep -E '^\s*LISTEN' /etc/nut/upsd.conf | head -1 | awk '{print $2}')
+  [[ "$CUR_LISTEN" == "0.0.0.0" ]] && CUR_LISTEN="reseau" || CUR_LISTEN="local"
+  echo "➤ upsd.conf existant détecté — mode actuel : $CUR_LISTEN"
+fi
+if [[ -f /etc/nut/upsd.users ]]; then
+  CUR_USER=$(grep -E '^\s*\[' /etc/nut/upsd.users | head -1 | tr -d '[] \t')
+  echo "➤ upsd.users existant détecté — compte actuel : ${CUR_USER:-<aucun>}"
+fi
+
+# ================================
 # CONFIGURATION NUT SERVER
 # ================================
 # --- Mode d'écoute : local uniquement (défaut, le bridge MQTT tourne en local)
 #     ou réseau pour une intégration NUT distante (filtrage IP possible) ---
-LISTEN_MODE=$(whiptail --title "Mode d'écoute NUT" --menu \
+LISTEN_DEFAULT="--default-item local"
+[[ "$CUR_LISTEN" == "reseau" ]] && LISTEN_DEFAULT="--default-item reseau"
+LISTEN_MODE=$(whiptail --title "Mode d'écoute NUT" --menu $LISTEN_DEFAULT \
   "Le bridge MQTT tourne en local sur ce RPi.\n\nÉcouter sur le réseau n'est utile que pour une intégration NUT distante (ex. Home Assistant)." 14 70 2 \
   "local"  "Local uniquement — 127.0.0.1:3493 (recommandé)" \
   "reseau" "Réseau — écoute sur toutes les interfaces" \
   3>&1 1>&2 2>&3) || LISTEN_MODE="local"
 
 # --- Compte de lecture upsd : utilisateur et mot de passe demandés ---
-UPSD_USER=$(whiptail --title "Compte upsd" --inputbox "Nom d'utilisateur pour l'accès à upsd\n(lecture seule, utilisé par upsc/le bridge et HA)" 10 60 "hass" 3>&1 1>&2 2>&3) || UPSD_USER="hass"
+UPSD_USER=$(whiptail --title "Compte upsd" --inputbox "Nom d'utilisateur pour l'accès à upsd\n(lecture seule, utilisé par upsc/le bridge et HA)" 10 60 "${CUR_USER:-hass}" 3>&1 1>&2 2>&3) || UPSD_USER="${CUR_USER:-hass}"
 while true; do
   UPSD_PASS=$(whiptail --title "Mot de passe upsd" --passwordbox "Mot de passe pour l'utilisateur '$UPSD_USER' :" 10 60 "" 3>&1 1>&2 2>&3) || { echo "Annulé."; exit 1; }
   UPSD_PASS2=$(whiptail --title "Confirmation" --passwordbox "Confirmez le mot de passe :" 10 60 "" 3>&1 1>&2 2>&3) || { echo "Annulé."; exit 1; }
