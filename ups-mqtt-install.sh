@@ -68,7 +68,7 @@ if [[ -s "$UPS_LIST_FILE" ]]; then
   UPS_NAME=$(whiptail --title "Onduleur" --menu "Quel onduleur publier ?" 15 60 "${#MENU_ARGS[@]}" \
     "${MENU_ARGS[@]}" 3>&1 1>&2 2>&3) || exit 1
 else
-  UPS_NAME=$(whiptail --title "Onduleur" --inputbox "Nom NUT de l'onduleur\n(vérifiez avec: upsc ups1@localhost)" 10 60 "ups1" 3>&1 1>&2 2>&3) || exit 1
+  UPS_NAME=$(whiptail --title "Onduleur" --inputbox "Nom NUT de l'onduleur\n(vérifiez avec: upsc ups1@localhost)" 10 60 "${UPS_NAME:-ups1}" 3>&1 1>&2 2>&3) || exit 1
 fi
 
 if ! upsc "$UPS_NAME@localhost" >/dev/null 2>&1; then
@@ -76,29 +76,33 @@ if ! upsc "$UPS_NAME@localhost" >/dev/null 2>&1; then
     --yesno "Impossible d'interroger '$UPS_NAME@localhost'.\n\nContinuer quand même ?" 10 60 || exit 1
 fi
 
-# --- Identifiants upsd (demandés systématiquement, rien en dur) ---
-UPS_AUTH_DEF="--defaultno"
-[[ -n "${UPS_USER:-}" ]] && UPS_AUTH_DEF=""
-if whiptail --title "Authentification upsd" \
-  --yesno $UPS_AUTH_DEF "Le serveur NUT local (upsd) nécessite-t-il un identifiant ?\n\n(si ups-setup.sh a créé un compte, répondez Oui)" 10 60; then
-  UPS_USER=$(whiptail --title "Utilisateur upsd" --inputbox "Nom d'utilisateur upsd" 10 60 "hass" 3>&1 1>&2 2>&3) || exit 1
+# --- Identifiants upsd : uniquement si upsc anonyme échoue ---
+# Par défaut upsd local répond sans authentification ; on ne demande rien
+# tant que la requête anonyme fonctionne (comportement historique du bridge).
+if upsc "$UPS_NAME@localhost" >/dev/null 2>&1; then
+  UPS_USER="${UPS_USER:-}"
+  UPS_PASS="${UPS_PASS:-}"
+else
+  whiptail --title "Authentification upsd requise" \
+    --msgbox "upsc ne peut pas interroger l'onduleur sans identifiants.\n\nVérifiez que nut-server tourne (systemctl status nut-server)." 10 60
+  UPS_USER=$(whiptail --title "Utilisateur upsd" --inputbox "Nom d'utilisateur upsd" 10 60 "${UPS_USER:-hass}" 3>&1 1>&2 2>&3) || exit 1
   UPS_PASS=$(whiptail --title "Mot de passe upsd" --passwordbox "Mot de passe upsd" 10 60 "" 3>&1 1>&2 2>&3) || exit 1
   if ! upsc -u "$UPS_USER" -p "$UPS_PASS" "$UPS_NAME@localhost" >/dev/null 2>&1; then
     whiptail --title "Identifiants refusés" \
-      --yesno "upsc refuse ces identifiants.\n\nContinuer quand même ?" 10 60 || exit 1
+      --yesno "upsc refuse toujours ces identifiants.\n\nContinuer quand même ?" 10 60 || exit 1
   fi
-else
-  UPS_USER=""; UPS_PASS=""
 fi
 
 # ================================
 # 2. QUESTIONS MQTT
 # ================================
 MQTT_HOST=$(whiptail --title "Broker MQTT" --inputbox "Adresse du broker MQTT\n(généralement l'IP de Home Assistant)" 10 60 "${MQTT_HOST:-10.210.11.44}" 3>&1 1>&2 2>&3) || exit 1
-MQTT_PORT=$(whiptail --title "Port MQTT" --inputbox "Port du broker" 10 60 "1883" 3>&1 1>&2 2>&3) || exit 1
+MQTT_PORT=$(whiptail --title "Port MQTT" --inputbox "Port du broker" 10 60 "${MQTT_PORT:-1883}" 3>&1 1>&2 2>&3) || exit 1
 
-if whiptail --title "Authentification" --yesno "Le broker MQTT nécessite-t-il un identifiant ?" 10 60; then
-  MQTT_USER=$(whiptail --title "Utilisateur MQTT" --inputbox "Nom d'utilisateur" 10 60 "" 3>&1 1>&2 2>&3) || exit 1
+MQTT_AUTH_DEF="--defaultno"
+[[ -n "${MQTT_USER:-}" ]] && MQTT_AUTH_DEF=""
+if whiptail --title "Authentification" --yesno $MQTT_AUTH_DEF "Le broker MQTT nécessite-t-il un identifiant ?" 10 60; then
+  MQTT_USER=$(whiptail --title "Utilisateur MQTT" --inputbox "Nom d'utilisateur" 10 60 "${MQTT_USER:-}" 3>&1 1>&2 2>&3) || exit 1
   MQTT_PASS=$(whiptail --title "Mot de passe" --passwordbox "Mot de passe MQTT" 10 60 "" 3>&1 1>&2 2>&3) || exit 1
 else
   MQTT_USER=""; MQTT_PASS=""
@@ -126,7 +130,7 @@ if ! mosquitto_pub "${MQTT_ARGS[@]}" -t "$TEST_TOPIC" -m "ok" >/dev/null 2>&1; t
   fi
 fi
 
-POLL=$(whiptail --title "Fréquence" --inputbox "Intervalle de publication (secondes)" 10 60 "30" 3>&1 1>&2 2>&3) || POLL=30
+POLL=$(whiptail --title "Fréquence" --inputbox "Intervalle de publication (secondes)" 10 60 "${POLL_INTERVAL:-30}" 3>&1 1>&2 2>&3) || POLL="${POLL_INTERVAL:-30}"
 NODE_ID=$(whiptail --title "Identifiant" --inputbox "Identifiant unique de cette machine\n(nom de l'appareil dans Home Assistant)" 10 60 "${NODE_ID:-$(hostname)}" 3>&1 1>&2 2>&3) || NODE_ID=$(hostname)
 
 # ================================
