@@ -56,7 +56,7 @@ Le script :
 * détecte les onduleurs USB avec `nut-scanner -U` et les nomme `ups1`, `ups2`, … ;
 * **demande le mode d'écoute** :
   * `local` (défaut, recommandé) — `LISTEN 127.0.0.1 3493` : upsd n'est accessible que depuis le RPi, le bridge MQTT tourne en local donc ça suffit ;
-  * `reseau` — `LISTEN 0.0.0.0 3493` : pour une intégration NUT distante (ex. HA), avec **filtrage IP optionnel** (règle UFW limitée à une IP, ex. celle de HA) ;
+  * `reseau` — `LISTEN 0.0.0.0 3493` : pour une intégration NUT distante (ex. HA), avec **filtrage IP optionnel** — une ou **plusieurs IP** séparées par des espaces ou des virgules (une règle UFW par IP, ex. celle de HA et d'un autre hôte) ;
 * **demande le nom d'utilisateur et le mot de passe** du compte upsd (double saisie + confirmation) — **aucun identifiant codé en dur** ; le compte est en lecture seule (`upsmon slave`) ;
 * active et démarre `nut-server`.
 

@@ -124,13 +124,16 @@ echo "MODE=netserver" > /etc/nut/nut.conf
 # upsd.conf
 if [[ "$LISTEN_MODE" == "reseau" ]]; then
   # Écoute réseau + filtrage IP optionnel via UFW
-  ALLOW_IP=$(whiptail --title "Filtrage IP (optionnel)" --inputbox "Adresse IP autorisée à se connecter (ex. IP de Home Assistant)\n\nVide = aucune restriction par pare-feu." 10 60 "" 3>&1 1>&2 2>&3) || ALLOW_IP=""
+  ALLOW_IPS=$(whiptail --title "Filtrage IP (optionnel)" --inputbox "IP(s) autorisée(s) à se connecter — plusieurs possibles, séparées par des espaces (ex. IP de Home Assistant et d'un autre hôte)\n\nVide = aucune restriction par pare-feu." 12 70 "" 3>&1 1>&2 2>&3) || ALLOW_IPS=""
+  ALLOW_IPS=${ALLOW_IPS//,/ }   # accepte aussi des virgules
   cat <<EOF > /etc/nut/upsd.conf
 LISTEN 0.0.0.0 3493
 EOF
-  if [[ -n "$ALLOW_IP" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
-    ufw allow from "$ALLOW_IP" to any port 3493 proto tcp
-    UFW_RULE_ADDED=1
+  if [[ -n "${ALLOW_IPS// /}" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
+    for ip in $ALLOW_IPS; do
+      ufw allow from "$ip" to any port 3493 proto tcp
+      UFW_RULE_ADDED=1
+    done
   fi
 else
   cat <<'EOF' > /etc/nut/upsd.conf
@@ -167,7 +170,7 @@ echo "Key files:"
 echo "  ➤ /etc/nut/nut.conf"
 echo "  ➤ /etc/nut/ups.conf"
 if [[ "$LISTEN_MODE" == "reseau" ]]; then
-  echo "  ➤ /etc/nut/upsd.conf  (LISTEN 0.0.0.0:3493${ALLOW_IP:+ — filtrage UFW: $ALLOW_IP})"
+  echo "  ➤ /etc/nut/upsd.conf  (LISTEN 0.0.0.0:3493${ALLOW_IPS:+ — filtrage UFW: $ALLOW_IPS})"
 else
   echo "  ➤ /etc/nut/upsd.conf  (LISTEN 127.0.0.1:3493 — local uniquement)"
 fi
@@ -200,7 +203,7 @@ echo "Troubleshooting:"
 echo "  ➤ systemctl status nut-server"
 echo "  ➤ journalctl -u nut-server -e"
 echo "  ➤ nut-scanner -U   (redécouvrir les onduleurs)"
-if [[ "$LISTEN_MODE" == "reseau" && -z "${ALLOW_IP:-}" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
+if [[ "$LISTEN_MODE" == "reseau" && -z "${ALLOW_IPS// /}" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
   echo ""
   echo "⚠  UFW est actif et aucun filtrage IP n'a été défini :"
   echo "   ufw allow from <IP_Home_Assistant> to any port 3493 proto tcp"
