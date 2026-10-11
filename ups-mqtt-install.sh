@@ -164,8 +164,16 @@ AUTH=()
 BASE="home/ups/$NODE_ID"
 DISC="homeassistant/sensor/$NODE_ID"
 
+PUB_FAILS=0
 publish() {
-  mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" "${AUTH[@]}" "$@"
+  if ! ERR=$(mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" "${AUTH[@]}" "$@" 2>&1); then
+    PUB_FAILS=$((PUB_FAILS + 1))
+    # Logue uniquement les échecs (1 par cycle max), pas les succès
+    echo "ERREUR mosquitto_pub (échec #$PUB_FAILS) : $ERR" >&2
+    return 1
+  fi
+  PUB_FAILS=0
+  return 0
 }
 
 # --- Découverte HA (QoS 1, retained) ---
@@ -205,6 +213,9 @@ declare -A SENSORS=(
 
 # --- Infos d'identification (fiche appareil HA) ---
 INIT_DATA=$(upsc "$UPS_NAME@$UPS_HOST" 2>/dev/null)
+if [[ -z "$INIT_DATA" ]]; then
+  echo "ATTENTION : upsc ne renvoie aucune donnée pour '$UPS_NAME@$UPS_HOST' — découverte publiée avec fabricant=NUT, pas de modèle/série." >&2
+fi
 iget() { echo "$INIT_DATA" | awk -F': ' -v k="$1" '$1==k{print $2}'; }
 DEV_MFR=$(iget device.mfr)
 DEV_MODEL=$(iget device.model)
@@ -231,6 +242,7 @@ done
 while true; do
   DATA=$(upsc "$UPS_NAME@$UPS_HOST" 2>/dev/null)
   if [[ -z "$DATA" ]]; then
+    echo "ERREUR : upsc ne renvoie rien pour '$UPS_NAME@$UPS_HOST' — vérifiez nut-server" >&2
     sleep "$POLL_INTERVAL"
     continue
   fi
