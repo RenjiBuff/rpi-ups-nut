@@ -124,7 +124,7 @@ echo "MODE=netserver" > /etc/nut/nut.conf
 # upsd.conf
 if [[ "$LISTEN_MODE" == "reseau" ]]; then
   # Écoute réseau + filtrage IP optionnel via UFW
-  ALLOW_IPS=$(whiptail --title "Filtrage IP (optionnel)" --inputbox "IP(s) autorisée(s) à se connecter — plusieurs possibles, séparées par des espaces (ex. IP de Home Assistant et d'un autre hôte)\n\nVide = aucune restriction par pare-feu." 12 70 "" 3>&1 1>&2 2>&3) || ALLOW_IPS=""
+  ALLOW_IPS=$(whiptail --title "Filtrage IP (optionnel)" --inputbox "IP(s) autorisée(s) à se connecter — plusieurs possibles, séparées par des espaces ou des virgules.\n\nExemple :  10.210.11.44 10.210.11.45 10.210.11.50\n\nVide = aucune restriction par pare-feu." 14 70 "" 3>&1 1>&2 2>&3) || ALLOW_IPS=""
   ALLOW_IPS=${ALLOW_IPS//,/ }   # accepte aussi des virgules
   cat <<EOF > /etc/nut/upsd.conf
 LISTEN 0.0.0.0 3493
