@@ -63,6 +63,19 @@ if ! upsc "$UPS_NAME@localhost" >/dev/null 2>&1; then
     --yesno "Impossible d'interroger '$UPS_NAME@localhost'.\n\nContinuer quand même ?" 10 60 || exit 1
 fi
 
+# --- Identifiants upsd (demandés systématiquement, rien en dur) ---
+if whiptail --title "Authentification upsd" \
+  --yesno "Le serveur NUT local (upsd) nécessite-t-il un identifiant ?\n\n(si ups-setup.sh a créé un compte, répondez Oui)" 10 60; then
+  UPS_USER=$(whiptail --title "Utilisateur upsd" --inputbox "Nom d'utilisateur upsd" 10 60 "hass" 3>&1 1>&2 2>&3) || exit 1
+  UPS_PASS=$(whiptail --title "Mot de passe upsd" --passwordbox "Mot de passe upsd" 10 60 "" 3>&1 1>&2 2>&3) || exit 1
+  if ! upsc -u "$UPS_USER" -p "$UPS_PASS" "$UPS_NAME@localhost" >/dev/null 2>&1; then
+    whiptail --title "Identifiants refusés" \
+      --yesno "upsc refuse ces identifiants.\n\nContinuer quand même ?" 10 60 || exit 1
+  fi
+else
+  UPS_USER=""; UPS_PASS=""
+fi
+
 # ================================
 # 2. QUESTIONS MQTT
 # ================================
@@ -113,6 +126,11 @@ cat <<'BRIDGE_EOF' > /usr/local/bin/ups-mqtt-bridge.sh
 
 UPS_NAME="${UPS_NAME:-ups1}"
 UPS_HOST="${UPS_HOST:-localhost}"
+UPS_USER="${UPS_USER:-}"
+UPS_PASS="${UPS_PASS:-}"
+
+UPSC=(upsc)
+[[ -n "$UPS_USER" ]] && UPSC+=(-u "$UPS_USER" -p "$UPS_PASS")
 MQTT_HOST="${MQTT_HOST:-127.0.0.1}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
@@ -166,7 +184,7 @@ declare -A SENSORS=(
 )
 
 # --- Infos d'identification (fiche appareil HA) ---
-INIT_DATA=$(upsc "$UPS_NAME@$UPS_HOST" 2>/dev/null)
+INIT_DATA=$("${UPSC[@]}" "$UPS_NAME@$UPS_HOST" 2>/dev/null)
 iget() { echo "$INIT_DATA" | awk -F': ' -v k="$1" '$1==k{print $2}'; }
 DEV_MFR=$(iget device.mfr)
 DEV_MODEL=$(iget device.model)
@@ -191,7 +209,7 @@ done
 
 # --- Boucle de publication ---
 while true; do
-  DATA=$(upsc "$UPS_NAME@$UPS_HOST" 2>/dev/null)
+  DATA=$("${UPSC[@]}" "$UPS_NAME@$UPS_HOST" 2>/dev/null)
   if [[ -z "$DATA" ]]; then
     sleep "$POLL_INTERVAL"
     continue
@@ -244,6 +262,8 @@ echo "➤ Écriture de la configuration..."
 cat <<ENV_EOF > /etc/default/ups-mqtt-bridge
 UPS_NAME="$UPS_NAME"
 UPS_HOST="localhost"
+UPS_USER="$UPS_USER"
+UPS_PASS="$UPS_PASS"
 MQTT_HOST="$MQTT_HOST"
 MQTT_PORT="$MQTT_PORT"
 MQTT_USER="$MQTT_USER"

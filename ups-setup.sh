@@ -82,19 +82,50 @@ cat "$UPS_LIST_FILE"
 # ================================
 # CONFIGURATION NUT SERVER
 # ================================
+# --- Mode d'écoute : local uniquement (défaut, le bridge MQTT tourne en local)
+#     ou réseau pour une intégration NUT distante (filtrage IP possible) ---
+LISTEN_MODE=$(whiptail --title "Mode d'écoute NUT" --menu \
+  "Le bridge MQTT tourne en local sur ce RPi.\n\nÉcouter sur le réseau n'est utile que pour une intégration NUT distante (ex. Home Assistant)." 14 70 2 \
+  "local"  "Local uniquement — 127.0.0.1:3493 (recommandé)" \
+  "reseau" "Réseau — écoute sur toutes les interfaces" \
+  3>&1 1>&2 2>&3) || LISTEN_MODE="local"
+
+# --- Compte de lecture upsd : utilisateur et mot de passe demandés ---
+UPSD_USER=$(whiptail --title "Compte upsd" --inputbox "Nom d'utilisateur pour l'accès à upsd\n(lecture seule, utilisé par upsc/le bridge et HA)" 10 60 "hass" 3>&1 1>&2 2>&3) || UPSD_USER="hass"
+while true; do
+  UPSD_PASS=$(whiptail --title "Mot de passe upsd" --passwordbox "Mot de passe pour l'utilisateur '$UPSD_USER' :" 10 60 "" 3>&1 1>&2 2>&3) || { echo "Annulé."; exit 1; }
+  UPSD_PASS2=$(whiptail --title "Confirmation" --passwordbox "Confirmez le mot de passe :" 10 60 "" 3>&1 1>&2 2>&3) || { echo "Annulé."; exit 1; }
+  [[ "$UPSD_PASS" == "$UPSD_PASS2" && -n "$UPSD_PASS" ]] && break
+  whiptail --title "⚠ Mots de passe" --msgbox "Les mots de passe ne correspondent pas (ou vides). Réessayez." 10 60
+ done
+
 # nut.conf
 echo "MODE=netserver" > /etc/nut/nut.conf
 
-# upsd.conf — écoute sur le réseau pour Home Assistant (port 3493)
-cat <<'EOF' > /etc/nut/upsd.conf
+# upsd.conf
+if [[ "$LISTEN_MODE" == "reseau" ]]; then
+  # Écoute réseau + filtrage IP optionnel via UFW
+  ALLOW_IP=$(whiptail --title "Filtrage IP (optionnel)" --inputbox "Adresse IP autorisée à se connecter (ex. IP de Home Assistant)\n\nVide = aucune restriction par pare-feu." 10 60 "" 3>&1 1>&2 2>&3) || ALLOW_IP=""
+  cat <<EOF > /etc/nut/upsd.conf
 LISTEN 0.0.0.0 3493
 EOF
-
-# upsd.users — compte en lecture pour Home Assistant
-cat <<'EOF' > /etc/nut/upsd.users
-[hass]
-  password = homeassistant
+  if [[ -n "$ALLOW_IP" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
+    ufw allow from "$ALLOW_IP" to any port 3493 proto tcp
+    UFW_RULE_ADDED=1
+  fi
+else
+  cat <<'EOF' > /etc/nut/upsd.conf
+LISTEN 127.0.0.1 3493
 EOF
+fi
+
+# upsd.users — compte en lecture (upsmon 'slave' réduit à la lecture des variables)
+cat <<EOF > /etc/nut/upsd.users
+[$UPSD_USER]
+  password = $UPSD_PASS
+  upsmon slave
+EOF
+chmod 640 /etc/nut/upsd.users
 
 # ================================
 # ENABLE SERVICES
@@ -116,31 +147,42 @@ echo ""
 echo "Key files:"
 echo "  ➤ /etc/nut/nut.conf"
 echo "  ➤ /etc/nut/ups.conf"
-echo "  ➤ /etc/nut/upsd.conf  (LISTEN 0.0.0.0:3493)"
-echo "  ➤ /etc/nut/upsd.users"
+if [[ "$LISTEN_MODE" == "reseau" ]]; then
+  echo "  ➤ /etc/nut/upsd.conf  (LISTEN 0.0.0.0:3493${ALLOW_IP:+ — filtrage UFW: $ALLOW_IP})"
+else
+  echo "  ➤ /etc/nut/upsd.conf  (LISTEN 127.0.0.1:3493 — local uniquement)"
+fi
+echo "  ➤ /etc/nut/upsd.users (compte '$UPSD_USER', lecture seule)"
 echo ""
 echo "Detected UPS devices:"
 sed 's/^/  ➤ /' "$UPS_LIST_FILE"
 echo ""
 echo "───────────────────────────────────────────────"
-echo "Configuration Home Assistant (intégration NUT):"
-echo "  Host:     ${LAN_IP:-<IP_du_Raspberry_Pi>}"
-echo "  Port:     3493"
-echo "  Username: hass"
-echo "  Password: homeassistant"
-echo "  UPS name: $(head -1 "$UPS_LIST_FILE")"
+if [[ "$LISTEN_MODE" == "reseau" ]]; then
+  echo "Accès réseau à upsd (intégration NUT HA, si besoin) :"
+  echo "  Host:     ${LAN_IP:-<IP_du_Raspberry_Pi>}"
+  echo "  Port:     3493"
+  echo "  Username: $UPSD_USER"
+  echo "  Password: (celui défini à l'installation)"
+  echo "  UPS name: $(head -1 "$UPS_LIST_FILE")"
+else
+  echo "upsd écoute en LOCAL UNIQUEMENT (127.0.0.1:3493)."
+  echo "Le bridge MQTT local peut l'interroger ; aucun accès réseau."
+fi
 echo "───────────────────────────────────────────────"
 echo ""
 echo "Tests:"
-echo "  ➤ upsc $(head -1 "$UPS_LIST_FILE")@localhost     (local)"
-echo "  ➤ upsc $(head -1 "$UPS_LIST_FILE")@${LAN_IP:-<IP>}   (depuis HA)"
+echo "  ➤ upsc -u $UPSD_USER -p <mot_de_passe> $(head -1 "$UPS_LIST_FILE")@localhost   (local)"
+if [[ "$LISTEN_MODE" == "reseau" ]]; then
+  echo "  ➤ upsc -u $UPSD_USER -p <mot_de_passe> $(head -1 "$UPS_LIST_FILE")@${LAN_IP:-<IP>}   (depuis HA)"
+fi
 echo ""
 echo "Troubleshooting:"
 echo "  ➤ systemctl status nut-server"
 echo "  ➤ journalctl -u nut-server -e"
 echo "  ➤ nut-scanner -U   (redécouvrir les onduleurs)"
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
+if [[ "$LISTEN_MODE" == "reseau" && -z "${ALLOW_IP:-}" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
   echo ""
-  echo "⚠  UFW est actif : autorisez le port 3493 depuis HA :"
+  echo "⚠  UFW est actif et aucun filtrage IP n'a été défini :"
   echo "   ufw allow from <IP_Home_Assistant> to any port 3493 proto tcp"
 fi

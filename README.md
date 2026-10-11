@@ -54,10 +54,15 @@ Le script :
 
 * installe `nut`, `nut-client`, `nut-server`, `whiptail` ;
 * détecte les onduleurs USB avec `nut-scanner -U` et les nomme `ups1`, `ups2`, … ;
-* écrit `/etc/nut/nut.conf` (`MODE=netserver`), `upsd.conf` (`LISTEN 0.0.0.0 3493`), `upsd.users` (compte `hass` / `homeassistant`) ;
+* **demande le mode d'écoute** :
+  * `local` (défaut, recommandé) — `LISTEN 127.0.0.1 3493` : upsd n'est accessible que depuis le RPi, le bridge MQTT tourne en local donc ça suffit ;
+  * `reseau` — `LISTEN 0.0.0.0 3493` : pour une intégration NUT distante (ex. HA), avec **filtrage IP optionnel** (règle UFW limitée à une IP, ex. celle de HA) ;
+* **demande le nom d'utilisateur et le mot de passe** du compte upsd (double saisie + confirmation) — **aucun identifiant codé en dur** ; le compte est en lecture seule (`upsmon slave`) ;
 * active et démarre `nut-server`.
 
 > ℹ️ Même si l'intégration NUT de HA ne fonctionne pas (section 5), ce script **reste obligatoire** : le bridge MQTT a besoin du serveur NUT local pour interroger l'onduleur via `upsc`.
+
+> 🔒 Par défaut, upsd écoute **en local uniquement** (`127.0.0.1:3493`) : aucune exposition réseau tant qu'on n'a pas besoin d'une intégration NUT distante.
 
 ---
 
@@ -73,7 +78,8 @@ sudo ./ups-mqtt-install.sh
 L'installateur :
 
 * détecte l'onduleur (menu à partir de `/opt/ups-setup/ups_detected.list`) ;
-* demande l'adresse/port du broker Mosquitto, les identifiants, l'intervalle et un identifiant unique (`NODE_ID`) ;
+* **demande les identifiants upsd** si le serveur NUT local en requiert (testés immédiatement avec `upsc -u … -p …`) — le bridge les utilise pour toutes ses requêtes ;
+* demande l'adresse/port du broker Mosquitto, les identifiants MQTT, l'intervalle et un identifiant unique (`NODE_ID`) ;
 * teste la connexion au broker **avant** de déployer (2 essais + diagnostic port/identifiants) ;
 * déploie `/usr/local/bin/ups-mqtt-bridge.sh`, la config `/etc/default/ups-mqtt-bridge` (chmod 600) et le service systemd `ups-mqtt-bridge`.
 
@@ -139,11 +145,11 @@ L'intégration NUT native de HA **échoue** dans ce setup, alors même que le se
 
 * `upsc ups1@localhost` renvoie toutes les données depuis le RPi ;
 * `upsc ups1@<IP_RPi>` fonctionne depuis un autre hôte du LAN ;
-* mais dans HA : Paramètres → Appareils et services → Ajouter une intégration → **NUT** (Host : IP du RPi, Port : `3493`, Username : `hass`, Password : `homeassistant`) → la configuration **échoue** (erreur de connexion / entités jamais créées).
+* mais dans HA : Paramètres → Appareils et services → Ajouter une intégration → **NUT** (Host : IP du RPi, Port : `3493`, Username/Password : le compte upsd défini à l'installation) → la configuration **échoue** (erreur de connexion / entités jamais créées).
 
 Ce type d'échec est un problème récurrent de l'intégration NUT de HA (incompatibilités selon les drivers/onduleurs, réponses de `upsd` que l'intégration ne tolère pas). Peu importe la cause exacte ici : **c'est le constat, et c'est pour ça que le bridge MQTT a été réalisé.**
 
-Si tu veux malgré tout réessayer un jour : vérifier le port 3493 (`ufw status`), les identifiants `hass/homeassistant`, et les logs HA (`home-assistant.log`). Mais la voie fiable et retenue est la suivante.
+Si tu veux malgré tout réessayer un jour : vérifier le port 3493 (`ufw status`), les identifiants du compte upsd définis à l'installation, et les logs HA (`home-assistant.log`). Mais la voie fiable et retenue est la suivante.
 
 ### Intégration MQTT — ✅ solution retenue
 
@@ -181,7 +187,7 @@ automation:
 En théorie :
 
 1. Sur le RPi Kodi : lancer `ups-setup.sh` (NUT serveur écoute sur `0.0.0.0:3493`).
-2. Dans HA : Ajouter une intégration → **NUT** → renseigner l'IP du RPi Kodi, port `3493`, `hass` / `homeassistant`.
+2. Dans HA : Ajouter une intégration → **NUT** → renseigner l'IP du RPi Kodi, port `3493`, et le compte upsd défini à l'installation.
 3. HA crée un **second appareil** distinct. Aucun conflit avec le premier UPS : les entités du RPi Kodi préfixent leur nom différemment (host différent).
 
 **Dans la pratique : c'est exactement ce qui a été tenté et l'intégration échoue** (section 5). Le port 3493 répond, les identifiants sont bons, mais HA refuse de configurer l'intégration. C'est la raison d'être du bridge MQTT.
@@ -244,7 +250,7 @@ sensor:
 |---|---|
 | Pas d'onduleur détecté | `nut-scanner -U` ; câble USB ; `lsusb` |
 | `upsc` ne répond pas | `systemctl status nut-server` ; `journalctl -u nut-driver@ups1` |
-| HA (NUT) ne connecte pas | comportement connu ici — voir section 5 ; port 3493 ouvert ? `ufw status` ; identifiants `hass/homeassistant` |
+| HA (NUT) ne connecte pas | comportement connu ici — voir section 5 ; port 3493 ouvert ? `ufw status` ; identifiants = compte upsd défini à l'installation |
 | Broker injoignable | IP de HA correcte ; add-on Mosquitto → Network → port 1883 exposé |
 | Publication refusée | utilisateurs MQTT de l'add-on Mosquitto |
 | Capteurs absents dans HA | MQTT → Écouter `home/ups/#` ; redémarrer `ups-mqtt-bridge` |
@@ -261,7 +267,7 @@ mosquitto_sub -h <IP_HA> -t 'home/ups/#' -v   # écoute brute du broker
 
 ### Fichiers clés
 
-* `/etc/nut/` — configuration NUT (ups.conf, upsd.conf, upsd.users, nut.conf)
+* `/etc/nut/` — configuration NUT (ups.conf, upsd.conf, upsd.users, nut.conf) — `upsd.users` contient le compte défini à l'installation (chmod 640)
 * `/opt/ups-setup/ups_detected.list` — onduleurs détectés
 * `/usr/local/bin/ups-mqtt-bridge.sh` — bridge
 * `/etc/default/ups-mqtt-bridge` — configuration du bridge (chmod 600, mot de passe)
